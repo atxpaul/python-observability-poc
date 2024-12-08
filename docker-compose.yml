@@ -1,0 +1,97 @@
+services:
+    grafana-alloy:
+        image: grafana/agent:latest
+        volumes:
+            - ./etc/alloy/alloy-config.yaml:/etc/agent/agent.yaml
+            - shared-logs:/var/log/containers
+        command: -config.file=/etc/agent/agent.yaml
+        depends_on:
+            - loki
+
+    loki:
+        image: grafana/loki:3.0.0
+        command: -config.file=/etc/loki/local-config.yaml
+        ports:
+            - '3100:3100'
+
+    app-a:
+        build: ./fastapi_app/
+        ports:
+            - '8000:8000'
+        depends_on:
+            - loki
+            - grafana-alloy
+        environment:
+            APP_NAME: 'app-a'
+        volumes:
+            - shared-logs:/var/log/containers
+        command: >
+            sh -c 'uvicorn main:app --host 0.0.0.0 --port 8000 2>&1 | tee /var/log/containers/app-a.log'
+
+    app-b:
+        build: ./fastapi_app/
+        ports:
+            - '8001:8000'
+        depends_on:
+            - loki
+        environment:
+            APP_NAME: 'app-b'
+        volumes:
+            - shared-logs:/var/log/containers
+        command: >
+            sh -c 'uvicorn main:app --host 0.0.0.0 --port 8000 2>&1 | tee /var/log/containers/app-b.log'
+
+    app-c:
+        build: ./fastapi_app/
+        ports:
+            - '8002:8000'
+        depends_on:
+            - loki
+        environment:
+            APP_NAME: 'app-c'
+        volumes:
+            - shared-logs:/var/log/containers
+        command: >
+            sh -c 'uvicorn main:app --host 0.0.0.0 --port 8000 2>&1 | tee /var/log/containers/app-c.log'
+
+    prometheus:
+        image: prom/prometheus:v2.51.2
+        ports:
+            - '9090:9090'
+        volumes:
+            - ./etc/prometheus:/workspace
+        command:
+            - --config.file=/workspace/prometheus.yml
+            - --enable-feature=exemplar-storage
+        depends_on:
+            - loki
+
+    tempo:
+        image: grafana/tempo:2.4.1
+        command:
+            [
+                '--target=all',
+                '--storage.trace.backend=local',
+                '--storage.trace.local.path=/var/tempo',
+                '--auth.enabled=false',
+            ]
+        ports:
+            - '4317:4317'
+            - '4318:4318'
+        depends_on:
+            - loki
+
+    grafana:
+        image: grafana/grafana:10.4.2
+        ports:
+            - '3000:3000'
+        volumes:
+            - ./etc/grafana/:/etc/grafana/provisioning/datasources
+            - ./etc/dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
+            - ./etc/dashboards:/etc/grafana/dashboards
+        depends_on:
+            - loki
+            - prometheus
+
+volumes:
+    shared-logs:
